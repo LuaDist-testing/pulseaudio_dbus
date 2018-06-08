@@ -1,30 +1,30 @@
 --[[
-Copyright 2016 Stefano Mazzucco
+  Copyright 2016 Stefano Mazzucco
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
 
   http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
 ]]
 
 --[[--
-Control audio devices using the
-[PulseAudio DBus interface](https://www.freedesktop.org/wiki/Software/PulseAudio/Documentation/Developer/Clients/DBus/).
+  Control audio devices using the
+  [PulseAudio DBus interface](https://www.freedesktop.org/wiki/Software/PulseAudio/Documentation/Developer/Clients/DBus/).
 
-For this to work, you need the line
-`load-module module-dbus-protocol`
-in the `/etc/pulse/default.pa` configuration file.
+  For this to work, you need the line
+  `load-module module-dbus-protocol`
+  in the `/etc/pulse/default.pa` configuration file.
 
-@license Apache License, version 2.0
-@author Stefano Mazzucco <stefano AT curso DOT re>
-@copyright 2016 Stefano Mazzucco
+  @license Apache License, version 2.0
+  @author Stefano Mazzucco <stefano AT curso DOT re>
+  @copyright 2016 Stefano Mazzucco
 ]]
 
 local ldbus = require("ldbus_api")
@@ -52,13 +52,15 @@ function pulse.get_address()
   return ldbus.api.get_value(data[1])
 end
 
-local function invalid_address_error(address)
+local function invalid_address_error(address, errormsg)
   local msg = "Cannot connect to PulseAudio DBus address '" ..
     address ..
     "' have you added the line\n" ..
     "load-module module-dbus-protocol\n" ..
     "to your configuration? " ..
-    "(e.g. /etc/pulse/default.pa)"
+    "(e.g. /etc/pulse/default.pa)\n" ..
+    "Original error:\n" ..
+    errormsg
   error(msg, 2)
 end
 
@@ -86,7 +88,7 @@ function pulse.get_sinks(address)
   if status  then
     return ldbus.api.get_value(data)[1]
   end
-  invalid_address_error(address)
+  invalid_address_error(address, data)
 end
 
 local function get_base_volume(address, sink)
@@ -109,9 +111,8 @@ local function get_base_volume(address, sink)
   if status  then
     return ldbus.api.get_value(data)[1]
   end
-  invalid_address_error(address)
+  invalid_address_error(address, data)
 end
-
 
 local function get_volume(address, sink)
   local opts = {
@@ -126,16 +127,15 @@ local function get_volume(address, sink)
       {sig = ldbus.types.string,
        value = "Volume"}
     }
-}
+  }
 
   local status, data = pcall(ldbus.api.call, opts)
 
   if status  then
     return ldbus.api.get_value(data)[1]
   end
-  invalid_address_error(address)
+  invalid_address_error(address, data)
 end
-
 
 local function get_volume_percent(address, sink)
   local base_volume = get_base_volume(address, sink)
@@ -168,7 +168,7 @@ local function is_muted(address, sink)
   if status  then
     return ldbus.api.get_value(data)[1]
   end
-  invalid_address_error(address)
+  invalid_address_error(address, data)
 end
 
 local function set_muted(address, sink, value)
@@ -221,6 +221,39 @@ local function set_volume_percent(address, sink, percent)
   set_volume(address, sink, volume)
 end
 
+--- Ask the PulseAudio server to send the given signal from the given interface.
+-- If this function is called more than once for the same signal, the latest
+-- call always replaces the previous object list.
+-- In order to support clients that want to receive absolutely all signals,
+-- **both** the `interface` and the `signal` parameters must be set to `nil`
+-- or left unspecified.
+-- In that case all previous signal filters are discarded.
+-- @param address The [DBus address](https://dbus.freedesktop.org/doc/dbus-tutorial.html#addresses).
+-- @param[optional] interface The name of the interface. E.g. `"org.PulseAudio.Core1.Device"`.
+-- @param[optional] signal The signal name. E.g. `"VolumeUpdated"`.
+-- @param[optional] object_paths Array of object paths that we want to listen to.
+-- If empty or not specified, signals from all objects are sent.
+function pulse.listen_for_signal(address, interface, signal, object_paths)
+  local iface_and_signal = ""
+  if interface and signal then
+    iface_and_signal = interface .. "." .. signal
+  end
+
+  local opts = {
+    bus = address,
+    dest = "org.PulseAudio1",
+    interface = "org.PulseAudio.Core1",
+    method = "ListenForSignal",
+    path = "/org/pulseaudio/core1",
+    args = {
+      {sig = ldbus.types.string,
+       value = iface_and_signal},
+      {sig = ldbus.types.array .. ldbus.types.object_path,
+       value = object_paths or {}}
+    }
+  }
+  ldbus.api.call(opts)
+end
 
 local getters = {
   volume = get_volume_percent,
