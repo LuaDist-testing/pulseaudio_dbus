@@ -1,9 +1,17 @@
+-- This file was automatically generated for the LuaDist project.
+
 package = "pulseaudio_dbus"
-version = "0.10.0-1"
+version = "0.11.0-1"
+-- LuaDist source
 source = {
-   url = "git://github.com/stefano-m/lua-pulseaudio_dbus",
-   tag = "v0.10.0"
+  tag = "0.11.0-1",
+  url = "git://github.com/LuaDist-testing/pulseaudio_dbus.git"
 }
+-- Original source
+-- source = {
+--    url = "git://github.com/stefano-m/lua-pulseaudio_dbus",
+--    tag = "v0.11.0"
+-- }
 description = {
    summary = "Control PulseAudio devices using DBus",
    detailed = "Control PulseAudio devices using DBus",
@@ -14,8 +22,8 @@ supported_platforms = {
    "linux"
 }
 dependencies = {
-   "lua >= 5.1",
-   "dbus_proxy >= 0.8.0, < 0.9"
+  "lua >= 5.1",
+  "dbus_proxy >= 0.8.0, < 0.9"
 }
 build = {
    type = "builtin",
