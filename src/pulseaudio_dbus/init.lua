@@ -23,12 +23,14 @@
   in `/etc/pulse/default.pa`
   or `~/.config/pulse/default.pa`
 
+  @module pulseaudio_dbus
+
   @usage
   pulse = require("pulseaudio_dbus")
   address = pulse.get_address()
   connection = pulse.get_connection(address)
   core = pulse.get_core(connection)
-  sink = pulse.get_device(address, core:get_sinks()[1])
+  sink = pulse.get_device(connection, core:get_sinks()[1])
   sink:set_muted(true)
   sink:toggle_muted()
   assert(not sink:is_muted())
@@ -115,9 +117,27 @@ function pulse.Core:get_sources()
     return self:Get("org.PulseAudio.Core1", "Sources")
 end
 
+--- Get the current fallback sink object path
+-- @return fallback sink object path (may not be up-to-date)
+-- @return nil if no falback sink is set
+-- @see pulse.Core:set_fallback_sink
+function pulse.Core:get_fallback_sink()
+  return self:Get("org.PulseAudio.Core1", "FallbackSink")
+end
+
+--- Set the current fallback sink object path
+-- @tparam string value fallback sink object path
+-- @see pulse.Core:get_fallback_sink
+function pulse.Core:set_fallback_sink(value)
+  self:Set("org.PulseAudio.Core1",
+           "FallbackSink",
+           lgi.GLib.Variant("o", value))
+  self.FallbackSink = {signature="o", value=value}
+end
+
 --- Get the current fallback source object path
 -- @return fallback source object path
--- @return nil if no falback source is set
+-- @return nil if no fallback source is set
 -- @see pulse.Core:set_fallback_source
 function pulse.Core:get_fallback_source()
   return self:Get("org.PulseAudio.Core1", "FallbackSource")
@@ -127,10 +147,10 @@ end
 -- @tparam string value fallback source object path
 -- @see pulse.Core:get_fallback_source
 function pulse.Core:set_fallback_source(value)
-  self:Set("org.PulseAudio.Core1.Device",
+  self:Set("org.PulseAudio.Core1",
            "FallbackSource",
            lgi.GLib.Variant("o", value))
-  self.Volume = {signature="o", value=value}
+  self.FallbackSource = {signature="o", value=value}
 end
 
 --- Get the pulseaudio [core object](https://www.freedesktop.org/wiki/Software/PulseAudio/Documentation/Developer/Clients/DBus/Core/)
@@ -151,6 +171,31 @@ function pulse.get_core(connection)
   _update_table(pulse.Core, core)
 
   return core
+end
+
+--- Pulseaudio
+-- [Stream](https://www.freedesktop.org/wiki/Software/PulseAudio/Documentation/Developer/Clients/DBus/Stream/)
+-- Use @{pulse.get_stream} to obtain a stream object.
+-- @type Stream
+pulse.Stream = {}
+
+--- Get the pulseaudio [Stream](https://www.freedesktop.org/wiki/Software/PulseAudio/Documentation/Developer/Clients/DBus/Stream/)
+-- @tparam lgi.Gio.DBusConnection connection DBus connection to the
+-- pulseaudio server
+-- @return A new Stream object
+function pulse.get_stream(connection, streampath)
+  local stream = proxy.Proxy:new(
+    {
+      bus=connection,
+      name=nil, -- nil, because bus is *not* a message bus.
+      path=streampath,
+      interface="org.PulseAudio.Core1.Stream"
+    }
+  )
+
+  _update_table(pulse.Stream, stream)
+
+  return stream
 end
 
 --- Pulseaudio
@@ -317,9 +362,9 @@ end
 -- @see pulse.get_core
 -- @usage
 -- -- get a pulseaudio sink (e.g. audio output)
--- sink = pulse.get_device(address, core:get_sinks()[1])
+-- sink = pulse.get_device(connection, core:get_sinks()[1])
 -- -- get a pulseaudio source (e.g. microphone)
--- source = pulse.get_device(address, core:get_sources([1]))
+-- source = pulse.get_device(connection, core:get_sources([1]))
 function pulse.get_device(connection, path, volume_step, volume_max)
   local device = proxy.Proxy:new(
     {

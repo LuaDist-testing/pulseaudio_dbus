@@ -1,33 +1,36 @@
 -- Works with the 'busted' framework.
 -- http://olivinelabs.com/busted/
 
-package.path = "../?.lua;" .. package.path
-local b = require("busted")
+require("busted")
 
 local pulse = require("pulseaudio_dbus")
 
-b.describe("PulseAudio with DBus", function ()
+describe("PulseAudio with DBus", function ()
+           local connection
+           local core
            local sink
            local original_volume
            local original_muted
 
-           b.before_each(function ()
+           before_each(function ()
                local address = pulse.get_address()
-               local connection = pulse.get_connection(address)
-               local core = pulse.get_core(connection)
+               connection = pulse.get_connection(address)
+               core = pulse.get_core(connection)
                local first_sink = assert(core.Sinks[1])
 	       sink = pulse.get_device(connection, first_sink)
                original_volume = sink:get_volume()
                original_muted = sink:is_muted()
            end)
 
-           b.after_each(function ()
+           after_each(function ()
                sink:set_volume(original_volume)
                sink:set_muted(original_muted)
                sink = nil
+               core = nil
+               connection = nil
            end)
 
-           b.it("Can get properties", function ()
+           it("Can get properties", function ()
                 local volume = sink.Volume
 
                 assert.is_boolean(sink.Mute)
@@ -38,28 +41,28 @@ b.describe("PulseAudio with DBus", function ()
                 assert.is_equal("port", sink.ActivePort:match("port"))
            end)
 
-           b.it("Can set same volume for all channels", function ()
+           it("Can set same volume for all channels", function ()
                 sink:set_volume({50})
                 assert.are.same({50, 50}, sink:get_volume())
            end)
 
-           b.it("Can set different volume for different channels", function ()
+           it("Can set different volume for different channels", function ()
                   sink:set_volume({50, 0})
                 assert.are.same({50, 0}, sink.Volume)
            end)
 
-           b.it("Can set muted", function ()
+           it("Can set muted", function ()
                 sink:set_muted(true)
                 assert.is_true(sink.Mute)
                 sink:set_muted(false)
                 assert.is_false(sink.Mute)
            end)
 
-           b.it("Can toggle muted", function ()
+           it("Can toggle muted", function ()
                   assert.are.equal(sink:is_muted(), not sink:toggle_muted())
            end)
 
-           b.it("Can get the state", function ()
+           it("Can get the state", function ()
                   local available_states = {"running",
                                             "idle",
                                             "suspended"}
@@ -77,7 +80,7 @@ b.describe("PulseAudio with DBus", function ()
                   assert.is_true(found)
            end)
 
-           b.it("Can step volume up", function ()
+           it("Can step volume up", function ()
                 local volume = sink:get_volume_percent()
                 local volume_step = sink.volume_step
 
@@ -92,7 +95,7 @@ b.describe("PulseAudio with DBus", function ()
                                 sink:get_volume_percent())
            end)
 
-           b.it("Will set the volume to 100 the first time step would get it above it", function ()
+           it("Will set the volume to 100 the first time step would get it above it", function ()
                   sink.volume_max = 110
                   sink.volume_step = 5
                   sink:set_volume_percent({97})
@@ -105,7 +108,7 @@ b.describe("PulseAudio with DBus", function ()
                   assert.are.same({105, 105}, sink:get_volume_percent())
            end)
 
-           b.it("Can step volume up to its maximum", function ()
+           it("Can step volume up to its maximum", function ()
                   sink:set_volume_percent({sink.volume_max})
 
                   sink:volume_up()
@@ -115,7 +118,7 @@ b.describe("PulseAudio with DBus", function ()
                 end
            end)
 
-           b.it("Can step volume down", function ()
+           it("Can step volume down", function ()
                 local volume = sink:get_volume_percent()
                 local volume_step = sink.volume_step
 
@@ -130,7 +133,7 @@ b.describe("PulseAudio with DBus", function ()
                                 sink:get_volume_percent())
            end)
 
-           b.it("Will set the volume to 100 the first time step would get it below it", function ()
+           it("Will set the volume to 100 the first time step would get it below it", function ()
                   sink.volume_step = 5
                   sink:set_volume_percent({102})
                   sink:volume_down()
@@ -142,7 +145,7 @@ b.describe("PulseAudio with DBus", function ()
                   assert.are.same({95, 95}, sink:get_volume_percent())
            end)
 
-           b.it("Will not step the volume below zero", function ()
+           it("Will not step the volume below zero", function ()
                   sink:set_volume({0})
                   sink:volume_down()
                   for _, actual in ipairs(sink.Volume) do
@@ -150,7 +153,7 @@ b.describe("PulseAudio with DBus", function ()
                   end
            end)
 
-           b.it("Will set the volume to zero if the step is too large", function ()
+           it("Will set the volume to zero if the step is too large", function ()
                 sink:set_volume_percent({1})
                 sink.volume_step = 100
 
@@ -159,5 +162,38 @@ b.describe("PulseAudio with DBus", function ()
                 for _, actual in ipairs(sink.Volume) do
                   assert.are.equal(0, actual)
                 end
+           end)
+
+           it("Will set the next sink as the FallbackSink", function()
+                  local total_number_of_sinks = #core.Sinks
+                  if total_number_of_sinks <= 1 then
+                    print("\nNOTE: Won't set the next sink as the FallbackSink because there is only one sink available in this machine")
+                    return
+                  end
+                  for s=1,total_number_of_sinks do
+                    if core.FallbackSink ~= sink[s].object_path then
+                      core:set_fallback_sink(sink[s].object_path)
+                      assert.is_equal(core.FallbackSink, sink[s].object_path)
+                      return
+                    end
+                  end
+           end)
+
+           it("Will Cycle through all available PlaybackStreams and move them to the FallbackSink", function()
+                  if #core.PlaybackStreams == 0 then
+                    print("\nNOTE: Can't cycle through all available PlaybackStreams and move them to the FallbackSink because there are no PlaybackStreams in this machine")
+                    return
+                  else
+                    local stream = {}
+                    for ps=1,#core.PlaybackStreams do
+                      stream[ps] = pulse.get_stream(connection, core.PlaybackStreams[ps])
+                      stream[ps]:Move(core.FallbackSink)
+                    end
+                    -- This test check whether the streams' `Device` property was actually changed
+                    for ps=1,#core.PlaybackStreams do
+                      stream[ps] = pulse.get_stream(connection, core.PlaybackStreams[ps])
+                      assert.is_equal(stream[ps].Device, core.FallbackSink)
+                    end
+                  end
            end)
 end)
